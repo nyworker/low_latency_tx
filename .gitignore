@@ -1,0 +1,14 @@
+# sample/captured video used as test input, not part of the pipeline
+*.ts
+*.mkv
+*.sdp
+
+# scratch/backup copies made while iterating on a script
+*.bak
+*.bak2
+
+# personal scratch notes
+note
+
+# local Claude Code project settings
+.claude/
