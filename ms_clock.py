@@ -27,12 +27,6 @@ class ClockWindow(Gtk.ApplicationWindow):
         self.label.set_justify(Gtk.Justification.CENTER)
         self.set_child(self.label)
 
-        # No title bar; drag the clock with the left mouse button to move it.
-        self.set_decorated(False)
-        drag = Gtk.GestureClick(button=1)
-        drag.connect("pressed", self.on_press)
-        self.label.add_controller(drag)
-
         css = Gtk.CssProvider()
         css.load_from_data(
             f"label {{ font-family: monospace; font-size: {FONT_SIZE}pt; }}".encode()
@@ -44,12 +38,6 @@ class ClockWindow(Gtk.ApplicationWindow):
         self.tick()
         # Update on every frame (vsync) so the clock is as fresh as the display allows.
         self.add_tick_callback(lambda *_: self.tick())
-
-    def on_press(self, gesture, n_press, x, y):
-        event = gesture.get_current_event()
-        self.get_surface().begin_move(
-            event.get_device(), 1, x, y, event.get_time()
-        )
 
     def tick(self):
         now = datetime.now()
