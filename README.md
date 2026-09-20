@@ -51,6 +51,34 @@ short version:
   restarts `ffplay` against the same SDP when either fires — recovering
   automatically instead of needing an external restart loop.
 
+## SRT variant
+
+- **`av1-send-srt.sh`** / **`av1-rcv-srt.sh`** — same encode chain as
+  `av1-send.sh`, but transported over SRT instead of raw RTP/UDP, for links
+  where SRT's loss recovery (ARQ) is wanted over RTP's "drop and wait for
+  the next keyframe" behavior. ffmpeg's mpegts muxer here doesn't tag AV1
+  correctly (round-trips as unrecognized `bin_data`), so this uses `-f ivf`
+  (On2's minimal size-prefixed frame container) as the self-framing payload
+  over `srt://` instead of the usual SRT-carries-MPEGTS convention.
+
+  ```sh
+  # receiver first (SRT listener; binds 0.0.0.0 by default, unlike av1-rcv.sh)
+  ./av1-rcv-srt.sh [host] [port] [desync-limit-seconds] [latency-microseconds]
+
+  # sender (SRT caller, connects out to the receiver)
+  ./av1-send-srt.sh <host> [port] [latency-microseconds]
+  ```
+
+  The `latency` value is SRT's own receive buffer (default 60ms here, vs.
+  the library default of 120ms) and must match on both ends since SRT
+  negotiates to the larger of the two. Keeping it low is what keeps this
+  variant's latency close to the plain RTP path's — see the comments in
+  `av1-send-srt.sh` for how that was measured. Also worth noting:
+  `av1-rcv-srt.sh` deliberately drops `av1-rcv.sh`'s `-fflags nobuffer`,
+  which was measured to cause a repeatable ~1s burst of AV1 decode errors at
+  every connect when combined with IVF-over-SRT (harmless on raw RTP/UDP,
+  where each `recv()` is already one whole packet).
+
 ## Alternative receivers (for comparison)
 
 - **`av1-rcv-mpv.sh`** — same idea via `mpv --profile=low-latency` instead of
