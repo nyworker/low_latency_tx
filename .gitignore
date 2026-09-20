@@ -12,3 +12,4 @@ note
 
 # local Claude Code project settings
 .claude/
+__pycache__/
