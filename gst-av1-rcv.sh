@@ -17,34 +17,53 @@ if [ -f "$RSRTP_PLUGIN_DIR/libgstrsrtp.so" ]; then
   export GST_PLUGIN_PATH="$RSRTP_PLUGIN_DIR${GST_PLUGIN_PATH:+:$GST_PLUGIN_PATH}"
 fi
 
+# Ultimate-low-latency tuning (each item removes a buffering stage):
+#  - LATENCY_MS default 0 + mode=none: jitterbuffer only reorders by seqnum
+#    and never waits on RTP-timestamp/clock-skew pacing (mode=none ignores
+#    the wall-clock mapping entirely, so frames are pushed the moment they
+#    are complete). faststart-min-packets=1 makes it start on the first pkt.
+#  - udpsrc buffer-size small + no extra queues: nothing to accumulate.
+#  - av1dec max-errors=0: the first decode error is fatal, so gst-launch
+#    exits non-zero instead of limping along on corrupt/stalled frames
+#    (restart to catch up to live). Any other pipeline ERROR (depay, sink,
+#    socket) also makes gst-launch exit. sync=false and qos=false on the
+#    sink stop it from waiting/dropping on timestamps.
+#  - videoconvert only if needed; glimagesink renders straight from the
+#    decoded I420 frame (GL does the YUV->RGB), avoiding a CPU convert.
+#  - GST_DEBUG kept quiet and -v dropped: per-buffer caps logging costs time.
 PORT="${1:-6000}"
-LATENCY_MS="${2:-50}"
+LATENCY_MS="${2:-0}"
+# Fullscreen: this is a Wayland session and glimagesink has no fullscreen
+# property, so use waylandsink fullscreen=true (compositor scales the
+# 640x360 stream up, keeping aspect ratio, no extra CPU convert).
+# Override, e.g. windowed: SINK="glimagesink sync=false qos=false" ./gst-av1-rcv.sh
+SINK="${SINK:-waylandsink fullscreen=true sync=false}"
 
-# rtpjitterbuffer latency=$LATENCY_MS: how long it holds packets waiting for
-# reordering before releasing them -- the gst analogue of av1-rcv.sh's
-# -reorder_queue_size 0, kept small on purpose for low latency.
-#
-# drop-on-latency=true: once the buffer is full, drop old packets rather
-# than blocking -- this is what gives catch-up behavior when decode falls
-# behind, instead of an ever-growing backlog. Unlike av1-rcv.sh's
-# desync-then-exit-and-restart design (there's no audio/wall-clock master
-# to measure drift against here, and no M-V-style stat to watch for it),
-# this pipeline self-recovers in place and never needs the
-# `while true; do ./gst-av1-rcv.sh; done` restart wrapper av1-rcv.sh needs.
-#
-# do-retransmission=false: av1-send.sh is one-way RTP with no RTCP
-# feedback loop, so there's nothing on the other end to ask for a resend.
-#
-# av1parse between the depayloader and decoder: rtpav1depay emits
-# alignment=obu (one OBU per buffer) but av1dec requires alignment=tu
-# (one full temporal unit per buffer); av1parse does that regrouping.
-#
-# autovideosink sync=false: don't block the pipeline pacing output to the
-# buffer's own timestamps -- render frames as they arrive, same motivation
-# as av1-rcv.sh's -sync ext + -framedrop (show live, don't queue).
-gst-launch-1.0 -v \
-  udpsrc port="$PORT" \
+# udpsrc timeout (ns) only posts a "GstUDPSrcTimeout" element message, not an
+# error, so run with -m and have the reader kill gst-launch when it appears.
+# NB: also triggers if the sender isn't up yet within NO_PKT_SECS of start.
+NO_PKT_SECS="${NO_PKT_SECS:-3}"
+set -o pipefail
+gst-launch-1.0 -m \
+  udpsrc port="$PORT" buffer-size=2097152 timeout=$((NO_PKT_SECS * 1000000000)) \
     caps="application/x-rtp,media=video,clock-rate=90000,encoding-name=AV1,payload=96" ! \
-  rtpjitterbuffer latency="$LATENCY_MS" drop-on-latency=true do-retransmission=false ! \
-  rtpav1depay ! av1parse ! av1dec ! \
-  videoconvert ! autovideosink sync=false
+  rtpjitterbuffer latency="$LATENCY_MS" mode=none drop-on-latency=true \
+    do-retransmission=false faststart-min-packets=1 ! \
+  rtpav1depay ! av1parse ! av1dec max-errors=0 ! \
+  $SINK | while IFS= read -r line; do
+    case $line in
+      *GstUDPSrcTimeout*)
+        echo "no packets for ${NO_PKT_SECS}s, quitting" >&2
+        pkill -TERM -P $$ -x gst-launch-1.0
+        exit 1 ;;
+      # stdout is swallowed by this reader, so surface error text (and the
+      # "Additional debug info" / "Execution ended" lines that follow) here.
+      ERROR*|*"error message"*|*"GstMessageError"*|*"Additional debug info"*)
+        echo "$line" >&2 ;;
+    esac
+  done
+rc=$?
+if [ "$rc" -ne 0 ]; then
+  echo "gst-av1-rcv: pipeline exited with status $rc" >&2
+fi
+exit "$rc"

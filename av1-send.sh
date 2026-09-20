@@ -43,11 +43,11 @@ SDP="${3:-/tmp/av1-stream.sdp}"
 # amount of backslashes survives both (ffmpeg 8 ends the quoted run at "\\:").
 # So the clock is built from one expansion per field with the literal colons
 # outside the braces, where they only need the single filtergraph-level escape.
-OL="drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:text='%{localtime\:%Y-%m-%d} %{localtime\:%H}\:%{localtime\:%M}\:%{localtime\:%S}':x=w-tw-30:y=h-th-30:fontsize=36:fontcolor=white:box=1:boxcolor=black@0.55:boxborderw=10"
+OL="drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:text='%{localtime\:%Y-%m-%d} %{localtime\:%H}\:%{localtime\:%M}\:%{localtime\:%S}.%{eif\:mod(floor(t*10)\,10)\:d}':x=w-tw-30:y=h-th-30:fontsize=36:fontcolor=white:box=1:boxcolor=black@0.55:boxborderw=10"
 
 INPUT='-video_size 640x360 -framerate 30 -i /dev/video0'
-INPUT='-input_format mjpeg -video_size 640x360 -framerate 30 -i /dev/video0' # v4l2-ctl -d /dev/video0 --list-formats-ext
 INPUT='-re -stream_loop -1 -i t.ts '
+INPUT='-input_format mjpeg -video_size 640x360 -framerate 30 -i /dev/video0' # v4l2-ctl -d /dev/video0 --list-formats-ext
 ffmpeg -fflags nobuffer $INPUT -vf "$OL" \
   -an -c:v libsvtav1 -preset 13 \
   -b:v 900k -bufsize 1260k \
