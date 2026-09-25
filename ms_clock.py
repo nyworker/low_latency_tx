@@ -107,7 +107,7 @@ class ClockWindow(Gtk.ApplicationWindow):
 
     def tick(self):
         now = datetime.now()
-        text = now.strftime("%H:%M:%S.") + f"{now.microsecond // 10000:02d}"
+        text = now.strftime("%H:%M:%S.") + f"{now.microsecond // 100000:01d}"
         if self.show_date:
             text = now.strftime("%Y-%m-%d\n") + text
         self.label.set_text(text)
